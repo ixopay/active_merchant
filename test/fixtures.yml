@@ -1578,3 +1578,117 @@ vantiv_online_systems:
 firstdata_compass:
   login: 'test_user'
   password: 'test_pass'
+
+payment_brands:
+  login: 'test_user'
+  password: 'test_pass'
+
+pay_dollar:
+  merchant_id: 'test_merchant'
+
+peso_pay:
+  merchant_id: 'test_merchant'
+
+promise_pay:
+  login: 'test_user'
+  private_key: 'test_key'
+
+rocketgate:
+  login: 'test_merchant_id'
+  password: 'test_gateway_password'
+
+six:
+  login: 'test_merchant'
+  password: 'test_validation_code'
+
+web2pay:
+  login: 'test_merchant'
+  password: 'test_validation_code'
+
+lucy:
+  login: 'test_user'
+  password: 'test_pass'
+
+merchant_link:
+  login: 'test_company'
+  subid: 'test_site'
+
+moneris_mpi:
+  store_id: 'test_store'
+  api_token: 'test_token'
+
+moneris_us:
+  login: 'test_store'
+  password: 'test_token'
+
+nsoftware_in_pay:
+  login: 'test_user'
+  password: 'test_pass'
+
+optimal_payment_netbanx:
+  acctid: 'test_account'
+  password: 'test_password'
+
+barclays_epdq:
+  login: 'test_user'
+  password: 'test_pass'
+  client_id: '1234'
+
+braspag:
+  merchant_id: 'test_merchant_id'
+  private_key: 'test_private_key'
+  network: 'Simulado'
+
+cardinal_centinel_mpi:
+  processor_id: 'test_processor'
+  merchant_id: 'test_merchant'
+  password: 'test_password'
+
+cobre_bem_aprova_facil:
+  login: 'testmerchant'
+
+credomatic:
+  user: 'test_user'
+  public_key: 'test_public_key'
+  private_key: 'test_private_key'
+
+doku:
+  mid: 'test_mid'
+  private_key: 'test_private_key'
+
+elavon_mpi:
+  merchant_id: 'test_merchant'
+  application_key: 'test_app_key'
+
+epx:
+  cid: '0001'
+  mid: '000000000001'
+  subid: '001'
+  tid: '001'
+
+federated:
+  login: 'demo'
+  password: 'password'
+
+global_cloud_pay:
+  merchant_id: 'test_merchant'
+  acctid: 'test_account'
+  password: 'test_password'
+
+global_one_pay:
+  tid: 'test_terminal'
+  private_key: 'test_private_key'
+
+global_payments:
+  login: 'test_user'
+  password: 'test_pass'
+
+ideal_rabobank:
+  login: '123456789'
+  password: 'password'
+  pem: 'test_pem'
+
+isbank:
+  login: 'test_user'
+  password: 'test_pass'
+  client_id: 'test_client'
