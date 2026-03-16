@@ -45,6 +45,28 @@ namespace :test do
     t.libs << 'test'
     t.verbose = true
   end
+
+  desc 'Run behavioral baseline tests for IXOPAY gateway reconciliation'
+  Rake::TestTask.new(:baselines) do |t|
+    ENV['RUNNING_UNIT_TESTS'] = 'true'
+    t.pattern = 'test/unit/gateways/behavioral_baselines/*_test.rb'
+    t.libs << 'test'
+    t.verbose = false
+  end
+
+  desc 'Run IXOPAY safety net tests (TokenEx-only gateways + baselines)'
+  Rake::TestTask.new(:safety_net) do |t|
+    ENV['RUNNING_UNIT_TESTS'] = 'true'
+    t.test_files = FileList[
+      'test/unit/gateways/behavioral_baselines/*_baseline_test.rb',
+      'test/unit/gateways/chase_net_connect_test.rb',
+      'test/unit/gateways/tsys_test.rb',
+      'test/unit/gateways/vantiv_online_systems_test.rb',
+      'test/unit/gateways/firstdata_compass_test.rb'
+    ]
+    t.libs << 'test'
+    t.verbose = false
+  end
 end
 
 namespace :gateways do

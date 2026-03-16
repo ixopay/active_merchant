@@ -1554,3 +1554,27 @@ worldpay_us:
 
 xpay:
   api_key: 5d952446-9004-4023-9eae-a527a152846b
+
+# IXOPAY TokenEx-only gateways
+chase_net_connect:
+  login: 'test_user'
+  password: 'test_pass'
+  mid: '000000000001'
+  cid: '0001'
+  tid: '001'
+
+tsys:
+  login: 'test_device_id'
+  password: 'test_transaction_key'
+
+vantiv_online_systems:
+  login: 'test_user'
+  password: 'test_pass'
+  mid: '000000000001'
+  bid: '0001'
+  tid: '001'
+  network: '000000'
+
+firstdata_compass:
+  login: 'test_user'
+  password: 'test_pass'
