@@ -1,0 +1,121 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 9 * * 1' # Weekly Monday at 9 AM UTC
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync:
+    name: Sync with upstream ActiveMerchant
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/activemerchant/active_merchant.git || true
+          git fetch upstream master
+
+      - name: Check for new upstream changes
+        id: check_changes
+        run: |
+          UPSTREAM_COMMITS=$(git log HEAD..upstream/master --oneline | wc -l | tr -d ' ')
+          echo "upstream_commits=$UPSTREAM_COMMITS" >> $GITHUB_OUTPUT
+          if [ "$UPSTREAM_COMMITS" -eq "0" ]; then
+            echo "No new upstream changes"
+          else
+            echo "Found $UPSTREAM_COMMITS new upstream commits"
+          fi
+
+      - name: Create sync branch
+        if: steps.check_changes.outputs.upstream_commits != '0'
+        run: |
+          BRANCH_NAME="upstream-sync/$(date +%Y-%m-%d)"
+          git checkout -b "$BRANCH_NAME"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: Merge upstream changes
+        if: steps.check_changes.outputs.upstream_commits != '0'
+        id: merge
+        run: |
+          if git merge upstream/master --no-edit; then
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            git merge --abort
+            git diff upstream/master --stat > /tmp/upstream-diff.txt
+          fi
+
+      - name: Set up Ruby
+        if: steps.check_changes.outputs.upstream_commits != '0' && steps.merge.outputs.merge_status == 'success'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Run tests on merged result
+        if: steps.check_changes.outputs.upstream_commits != '0' && steps.merge.outputs.merge_status == 'success'
+        id: tests
+        run: |
+          if bundle exec rake test:units; then
+            echo "tests_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "tests_passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push sync branch
+        if: steps.check_changes.outputs.upstream_commits != '0'
+        run: git push origin "${{ env.branch_name }}"
+
+      - name: Create Pull Request (clean merge)
+        if: steps.check_changes.outputs.upstream_commits != '0' && steps.merge.outputs.merge_status == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPSTREAM_LOG=$(git log HEAD..upstream/master --oneline | head -20)
+          TESTS_STATUS=${{ steps.tests.outputs.tests_passed == 'true' && 'All tests passing' || 'Some tests failing - review required' }}
+
+          gh pr create \
+            --title "Upstream sync: $(date +%Y-%m-%d)" \
+            --body "## Upstream Sync
+
+          **Commits from upstream:** ${{ steps.check_changes.outputs.upstream_commits }}
+          **Test status:** ${TESTS_STATUS}
+
+          ### Recent upstream changes:
+          \`\`\`
+          ${UPSTREAM_LOG}
+          \`\`\`
+
+          ### Conflict resolution priorities:
+          - Non-IXOPAY gateways: prefer upstream
+          - IXOPAY-reconciled gateways: review carefully, prefer IXOPAY parameters
+          - IXOPAY-only gateways: should not conflict" \
+            --base master
+
+      - name: Create Issue (merge conflict)
+        if: steps.check_changes.outputs.upstream_commits != '0' && steps.merge.outputs.merge_status == 'conflict'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Upstream sync conflict: $(date +%Y-%m-%d)" \
+            --body "## Upstream Sync - Manual Resolution Required
+
+          Automatic merge of upstream/master failed due to conflicts.
+
+          **Action required:** Manually resolve conflicts and run the full test suite.
+
+          See UPSTREAM_SYNC.md for conflict resolution guidelines."
