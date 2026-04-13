@@ -155,10 +155,13 @@ class VersaPayTest < Test::Unit::TestCase
   def test_parse_invalid_json
     body = '{"key1": "value1", "key2": "value2"'
 
-    assert_equal({ 'errors' => '{"key1": "value1", "key2": "value2"',
-                  'status' => 'Unable to parse JSON response',
-                  'message' => "859: unexpected token at '{\"key1\": \"value1\", \"key2\": \"value2\"'" },
-                 @gateway.send(:parse, body))
+    result = @gateway.send(:parse, body)
+    assert_equal body, result['errors']
+    assert_equal 'Unable to parse JSON response', result['status']
+    # Ruby's JSON parser error text varies by version. Just assert that an
+    # error message was captured; exact wording is not part of the contract.
+    assert_kind_of String, result['message']
+    refute_empty result['message']
   end
 
   def test_dig_avs_code_first_level

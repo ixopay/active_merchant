@@ -32,7 +32,9 @@ class LoanPaymentProTest < Test::Unit::TestCase
     result = @gateway.send(:parse, body)
     assert_equal 'Unable to parse JSON response', result[:status]
     assert_equal body, result[:errors]
-    assert result[:message].include?('unexpected token')
+    # Ruby's JSON parser error text varies by version: 'unexpected token' on
+    # older Rubies, 'unexpected character' / 'unexpected end of input' on 3.2+.
+    assert_match(/unexpected (token|character|end of input)/, result[:message])
   end
 
   def test_parse_empty_json
@@ -40,7 +42,7 @@ class LoanPaymentProTest < Test::Unit::TestCase
     result = @gateway.send(:parse, body)
     assert_equal 'Unable to parse JSON response', result[:status]
     assert_equal body, result[:errors]
-    assert result[:message].include?('unexpected token')
+    assert_match(/unexpected (token|character|end of input)/, result[:message])
   end
 
   def test_request_headers

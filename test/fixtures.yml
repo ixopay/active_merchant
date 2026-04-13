@@ -64,6 +64,11 @@ barclaycard_smartpay:
   merchant: merchant
   password: password
 
+barclays_epdq:
+  login: 'test_user'
+  password: 'test_pass'
+  client_id: '1234'
+
 barclays_epdq_extra_plus:
   login: merchant number
   user: username
@@ -133,6 +138,11 @@ braintree_orange:
   password: password
 
 # Working credentials, no need to replace
+braspag:
+  merchant_id: 'test_merchant_id'
+  private_key: 'test_private_key'
+  network: 'Simulado'
+
 bridge_pay:
   user_name: Spre3676
   password: H3392nc5
@@ -158,6 +168,11 @@ card_stream:
   shared_secret: Dear0Coming15Edge
 
 # Working credentials, no need to replace
+cardinal_centinel_mpi:
+  processor_id: 'test_processor'
+  merchant_id: 'test_merchant'
+  password: 'test_password'
+
 cardknox:
   api_key: ActiveMerchant_Test
 
@@ -189,6 +204,13 @@ cenpos:
 certo_direct:
   login: 1
   password: vP6OwK3
+
+chase_net_connect:
+  login: 'test_user'
+  password: 'test_pass'
+  mid: '000000000001'
+  cid: '0001'
+  tid: '001'
 
 checkout:
   merchant_id: SBMTEST
@@ -225,6 +247,9 @@ clearhaus_secure:
     InviQqJd1KTGRDmWIGrE5YACVmW2JSszD9t5VKxkAA==
     -----END RSA PRIVATE KEY-----
 
+cobre_bem_aprova_facil:
+  login: 'testmerchant'
+
 commerce_hub:
   api_key: API KEY
   api_secret: API SECRET
@@ -250,6 +275,11 @@ creditcall:
 # NOTE: the IP address you run the remote tests from will need to be
 # whitelisted by Credorax; contact support@credorax.com as necessary to request
 # your IP address be added to the whitelist for your test account.
+credomatic:
+  user: 'test_user'
+  public_key: 'test_public_key'
+  private_key: 'test_private_key'
+
 credorax:
   merchant_id: 'merchant_id'
   cipher_key: 'cipher_key'
@@ -337,6 +367,10 @@ direc_pay:
   login: 200904281000001
 
 # Working credentials, no need to replace
+doku:
+  mid: 'test_mid'
+  private_key: 'test_private_key'
+
 ebanx:
   integration_key: 1231000
 
@@ -350,6 +384,10 @@ elavon:
   login: "009005"
   user: "devportal"
   password: "BDDZY5KOUDCNPV4L3821K7PETO4Z7TPYOJB06TYBI1CW771IDHXBVBP51HZ6ZANJ"
+
+elavon_mpi:
+  merchant_id: 'test_merchant'
+  application_key: 'test_app_key'
 
 elavon_multi_currency:
   login: "009006"
@@ -370,6 +408,12 @@ element:
 epay:
   login: X
   password: Y
+
+epx:
+  cid: '0001'
+  mid: '000000000001'
+  subid: '001'
+  tid: '001'
 
 evo_ca:
   username: demo
@@ -402,6 +446,10 @@ fat_zebra:
   username: TEST
   token: TEST
 
+federated:
+  login: 'demo'
+  password: 'password'
+
 federated_canada:
   login: demo
   password: password
@@ -424,6 +472,10 @@ first_pay_rest_json:
   mode: "rest_json"
   merchant_key: "a91c38c3-7d7f-4d29-acc7-927b4dca0dbe"
   processor_id: "15417"
+
+firstdata_compass:
+  login: 'test_user'
+  password: 'test_pass'
 
 firstdata_e4:
   login: SD8821-67
@@ -469,6 +521,11 @@ garanti:
   merchant_id: 7000679
   password: "123qweASD"
 
+global_cloud_pay:
+  merchant_id: 'test_merchant'
+  acctid: 'test_account'
+  password: 'test_password'
+
 global_collect:
   merchant_id: 2196
   api_key_id: b2311c2c832dd238
@@ -478,6 +535,14 @@ global_collect_direct:
   merchant_id: "NamastayTest"
   api_key_id: "CF4CDF3F45F13C5CCBD0"
   secret_api_key: "mvcEXR7Rem+KJE/atKsQ3Luqv37VEvTe2VOH5/Ibqd90VDzQ71Ht41RBVVyJuebzGnFu30dYpptgdrCcNvAu5A=="
+
+global_one_pay:
+  tid: 'test_terminal'
+  private_key: 'test_private_key'
+
+global_payments:
+  login: 'test_user'
+  password: 'test_pass'
 
 global_transport:
   global_user_name: "USERNAME"
@@ -503,6 +568,11 @@ iats_payments:
   agent_code: TEST88
   password: TEST88
   region: na
+
+ideal_rabobank:
+  login: '123456789'
+  password: 'password'
+  pem: 'test_pem'
 
 inspire:
   login: demo
@@ -535,6 +605,10 @@ iridium:
     login: LOGIN
     password: PASSWORD
 
+isbank:
+  login: 'test_user'
+  password: 'test_pass'
+  client_id: 'test_client'
 itransact:
   login: API_ACCESS_USERNAME
   password: API_ACCESS_KEY
@@ -585,6 +659,10 @@ loan_payment_pro:
   password: demo
 
 # Working test credentials, no need to replace
+lucy:
+  login: 'test_user'
+  password: 'test_pass'
+
 maxipago:
   login: "100"
   password: "21g8u6gh6szw1gywfs165vui"
@@ -597,6 +675,10 @@ mercado_pago:
 merchant_esolutions:
   login: "94100008043900000004"
   password: "gvQzgKXOTEoDzpzJzROrQQzoKLaEqxjf"
+
+merchant_link:
+  login: 'test_company'
+  subid: 'test_site'
 
 merchant_one:
   username: 'demo'
@@ -674,6 +756,14 @@ moneris:
   login: store3
   password: yesguy
 
+moneris_mpi:
+  store_id: 'test_store'
+  api_token: 'test_token'
+
+moneris_us:
+  login: 'test_store'
+  password: 'test_token'
+
 money_movers:
   login: demo
   password: password
@@ -739,6 +829,10 @@ nmi:
 nmi_secure:
   security_key: '6457Thfj624V5r7WUwc5v6a68Zsd6YEm'
 
+nsoftware_in_pay:
+  login: 'test_user'
+  password: 'test_pass'
+
 nuvei:
   merchant_id: 'merchantId'
   merchant_site_id: 'siteId'
@@ -769,6 +863,10 @@ optimal_payment:
   store_id: test
   password: test
   account_number: ACCOUNTNUMBER
+
+optimal_payment_netbanx:
+  acctid: 'test_account'
+  password: 'test_password'
 
 orbital_gateway:
   login: LOGIN
@@ -805,6 +903,9 @@ pay_conex:
   api_accesskey: '69e9c4dd6b8ab9ab47da4e288df78315'
 
 # Working credentials, no need to replace
+pay_dollar:
+  merchant_id: 'test_merchant'
+
 pay_gate_xml:
   login: '10011021600'
   password: 'test'
@@ -867,6 +968,10 @@ payflow_uk:
   login: LOGIN
   password: PASSWORD
   partner: PayPalUk
+
+payment_brands:
+  login: 'test_user'
+  password: 'test_pass'
 
 payment_express:
   login: LOGIN
@@ -963,6 +1068,9 @@ payway_dot_com:
   company_id: "3"
   source_id: "67"
 
+peso_pay:
+  merchant_id: 'test_merchant'
+
 pin:
   api_key: "I_mo9BUUUXIwXF-avcs3LA"
 
@@ -985,6 +1093,10 @@ pro_pay:
   cert_str: "5ab9cddef2e4911b77e0c4ffb70f03"
 
 # Working credentials, no need to replace
+promise_pay:
+  login: 'test_user'
+  private_key: 'test_key'
+
 psigate:
   login: teststore
   password: psigate1234
@@ -1307,6 +1419,10 @@ redsys_sha256:
   signature_algorithm: 'sha256'
 
 # Working credentials, no need to replace
+rocketgate:
+  login: 'test_merchant_id'
+  password: 'test_gateway_password'
+
 s5:
   mode: CONNECTOR_TEST
   sender: ff80808142b2c03c0142b7a7339603e0
@@ -1365,6 +1481,10 @@ simetrik:
   client_secret: 'fq2riPpiDJaAwS4_UMAXZy1_nU1jNGz0F6gAFWOJFNmm_TfC8EFiHwMmGKAEDkwY' 
 
 #  Replace with your serial numbers for the skipjack test environment
+six:
+  login: 'test_merchant'
+  password: 'test_validation_code'
+
 skipjack:
   login: X
   password: Y
@@ -1458,6 +1578,10 @@ trust_commerce:
   aggregator_id: 'abc123'
 
 # Working credentials, no need to replace
+tsys:
+  login: 'test_device_id'
+  password: 'test_transaction_key'
+
 usa_epay:
   login: '4EoZ5U2Q55j976W7eplC71i6b7kn4pcV'
 
@@ -1478,6 +1602,14 @@ vanco:
   client_id: SPREEDLY
 
 # Working credentials, no need to replace
+vantiv_online_systems:
+  login: 'test_user'
+  password: 'test_pass'
+  mid: '000000000001'
+  bid: '0001'
+  tid: '001'
+  network: '000000'
+
 verify:
   login: 'demo'
   password: 'password'
@@ -1504,6 +1636,10 @@ vpos:
   encryption_key: "-----BEGIN PUBLIC KEY-----\n ..."
   commerce: 123
   commerce_branch: 45
+
+web2pay:
+  login: 'test_merchant'
+  password: 'test_validation_code'
 
 webpay:
   login: "test_secret_eHn4TTgsGguBcW764a2KA8Yd"
@@ -1556,139 +1692,3 @@ xpay:
   api_key: 5d952446-9004-4023-9eae-a527a152846b
 
 # IXOPAY TokenEx-only gateways
-chase_net_connect:
-  login: 'test_user'
-  password: 'test_pass'
-  mid: '000000000001'
-  cid: '0001'
-  tid: '001'
-
-tsys:
-  login: 'test_device_id'
-  password: 'test_transaction_key'
-
-vantiv_online_systems:
-  login: 'test_user'
-  password: 'test_pass'
-  mid: '000000000001'
-  bid: '0001'
-  tid: '001'
-  network: '000000'
-
-firstdata_compass:
-  login: 'test_user'
-  password: 'test_pass'
-
-payment_brands:
-  login: 'test_user'
-  password: 'test_pass'
-
-pay_dollar:
-  merchant_id: 'test_merchant'
-
-peso_pay:
-  merchant_id: 'test_merchant'
-
-promise_pay:
-  login: 'test_user'
-  private_key: 'test_key'
-
-rocketgate:
-  login: 'test_merchant_id'
-  password: 'test_gateway_password'
-
-six:
-  login: 'test_merchant'
-  password: 'test_validation_code'
-
-web2pay:
-  login: 'test_merchant'
-  password: 'test_validation_code'
-
-lucy:
-  login: 'test_user'
-  password: 'test_pass'
-
-merchant_link:
-  login: 'test_company'
-  subid: 'test_site'
-
-moneris_mpi:
-  store_id: 'test_store'
-  api_token: 'test_token'
-
-moneris_us:
-  login: 'test_store'
-  password: 'test_token'
-
-nsoftware_in_pay:
-  login: 'test_user'
-  password: 'test_pass'
-
-optimal_payment_netbanx:
-  acctid: 'test_account'
-  password: 'test_password'
-
-barclays_epdq:
-  login: 'test_user'
-  password: 'test_pass'
-  client_id: '1234'
-
-braspag:
-  merchant_id: 'test_merchant_id'
-  private_key: 'test_private_key'
-  network: 'Simulado'
-
-cardinal_centinel_mpi:
-  processor_id: 'test_processor'
-  merchant_id: 'test_merchant'
-  password: 'test_password'
-
-cobre_bem_aprova_facil:
-  login: 'testmerchant'
-
-credomatic:
-  user: 'test_user'
-  public_key: 'test_public_key'
-  private_key: 'test_private_key'
-
-doku:
-  mid: 'test_mid'
-  private_key: 'test_private_key'
-
-elavon_mpi:
-  merchant_id: 'test_merchant'
-  application_key: 'test_app_key'
-
-epx:
-  cid: '0001'
-  mid: '000000000001'
-  subid: '001'
-  tid: '001'
-
-federated:
-  login: 'demo'
-  password: 'password'
-
-global_cloud_pay:
-  merchant_id: 'test_merchant'
-  acctid: 'test_account'
-  password: 'test_password'
-
-global_one_pay:
-  tid: 'test_terminal'
-  private_key: 'test_private_key'
-
-global_payments:
-  login: 'test_user'
-  password: 'test_pass'
-
-ideal_rabobank:
-  login: '123456789'
-  password: 'password'
-  pem: 'test_pem'
-
-isbank:
-  login: 'test_user'
-  password: 'test_pass'
-  client_id: 'test_client'

@@ -457,7 +457,10 @@ module ActiveMerchant # :nodoc:
 
       def parse(body)
         xml = Nokogiri::XML(body)
-        response = Hash.from_xml(xml.to_s)['txn']
+        # Use xml.root.to_s rather than xml.to_s so that the XML declaration is
+        # not emitted twice when the source body has leading whitespace before
+        # its own <?xml ...?> directive (rexml 3.4+ rejects duplicate declarations).
+        response = Hash.from_xml(xml.root.to_s)['txn']
 
         response.deep_transform_keys { |key| key.gsub('ssl_', '').to_sym }
       end

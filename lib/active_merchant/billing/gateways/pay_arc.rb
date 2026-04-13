@@ -319,7 +319,15 @@ module ActiveMerchant # :nodoc:
       def parse(body)
         JSON.parse(body)
       rescue JSON::ParserError
-        body
+        # When PayArc returns a malformed JSON body (or a body Ruby's strict
+        # JSON parser rejects, such as unescaped backslashes in PHP file paths),
+        # return a Hash so downstream consumers — Response.new expects a Hash
+        # and all the *_from helpers look up string keys — don't blow up with
+        # NoMethodError.
+        {
+          'message' => 'Invalid JSON response received from PayArc',
+          'raw_response' => body
+        }
       end
 
       def filter_gateway_fields(post, options, gateway_fields)
