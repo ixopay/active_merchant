@@ -38,22 +38,17 @@ jobs:
           ruby-version: ${{ matrix.version }}
           bundler-cache: true
 
-      # IXOPAY Safety Net is the authoritative test suite for this fork.
-      # It covers all IXOPAY-specific work: the 4 active + 27 inactive TokenEx-only
-      # gateways, 19 behavioral baseline tests, and the compatibility shim module.
-      - name: IXOPAY Safety Net Tests
-        run: bundle exec rake test:safety_net
-
-      # Upstream unit tests run informationally. Pre-existing failures/errors in
-      # upstream gateways (e.g., REXML::ParseException in ElavonTest) are tracked
-      # via the weekly upstream-sync workflow, not this per-PR check.
-      - name: Upstream Unit Tests (informational)
+      # Full unit test suite — covers both upstream gateways and all IXOPAY
+      # additions (the 4 active + 27 inactive TokenEx-only gateways, 19
+      # behavioral baseline tests, and the compatibility shim module, since
+      # test:units is a glob over test/unit/**/*_test.rb and test:safety_net
+      # is a strict subset).
+      - name: Unit Tests
         run: bundle exec rake test:units
-        continue-on-error: true
 
-      # Rubocop runs informationally. The 27 inactive TokenEx-only gateways were
-      # copied verbatim from the legacy fork and have pre-existing style offenses
-      # that will be cleaned up incrementally in follow-up PRs.
+      # Rubocop runs informationally. The 27 inactive TokenEx-only gateways
+      # were copied verbatim from the legacy fork and have pre-existing style
+      # offenses that will be cleaned up incrementally in follow-up PRs.
       - name: Linter (informational)
         run: bundle exec rubocop
         continue-on-error: true
