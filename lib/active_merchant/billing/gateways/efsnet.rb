@@ -177,8 +177,10 @@ module ActiveMerchant # :nodoc:
       end
 
       def post_data(action, parameters = {})
-        xml   = REXML::Document.new("<?xml version='1.0' encoding='UTF-8'?>")
-        root  = xml.add_element('Request')
+        # rexml 3.4+ rejects a document that contains only an XML declaration
+        # with "No root element". Construct the declaration and root together.
+        xml   = REXML::Document.new("<?xml version='1.0' encoding='UTF-8'?><Request/>")
+        root  = xml.root
         root.attributes['StoreID'] = options[:login]
         root.attributes['StoreKey'] = options[:password]
         root.attributes['ApplicationID'] = 'ot 1.0'

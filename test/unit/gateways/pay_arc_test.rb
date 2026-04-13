@@ -344,7 +344,7 @@ class PayArcTest < Test::Unit::TestCase
     "code": 0,
     "message": "Invalid Card",
     "status_code": 409,
-    "exception": "App\\Containers\\Card\\Exceptions\\InvalidCardDetailsException",
+    "exception": "App\\\\Containers\\\\Card\\\\Exceptions\\\\InvalidCardDetailsException",
     "file": "/home/deploy/payarc.com/app/Containers/Token/Actions/CreateTokenAction.php",
     "line": 45
     }
@@ -715,7 +715,7 @@ class PayArcTest < Test::Unit::TestCase
           "code": 0,
           "message": "The requested token is not valid or already used",
           "status_code": 400,
-          "exception": "App\\Containers\\Customer\\Exceptions\\InvalidTokenException",
+          "exception": "App\\\\Containers\\\\Customer\\\\Exceptions\\\\InvalidTokenException",
           "file": "/home/deploy/payarc.com/app/Containers/Charge/Actions/CreateSaleAction.php",
           "line": 260
       }
@@ -729,7 +729,7 @@ class PayArcTest < Test::Unit::TestCase
           "code": 0,
           "message": "The requested token is not valid or already used",
           "status_code": 400,
-          "exception": "App\\Containers\\Customer\\Exceptions\\InvalidTokenException",
+          "exception": "App\\\\Containers\\\\Customer\\\\Exceptions\\\\InvalidTokenException",
           "file": "/home/deploy/payarc.com/app/Containers/Charge/Actions/CreateSaleAction.php",
           "line": 260
       }
@@ -793,7 +793,7 @@ class PayArcTest < Test::Unit::TestCase
         "code": 0,
         "message": "Amount requested is not available for Refund  ",
         "status_code": 409,
-        "exception": "Symfony\\Component\\HttpKernel\\Exception\\ConflictHttpException",
+        "exception": "Symfony\\\\Component\\\\HttpKernel\\\\Exception\\\\ConflictHttpException",
         "file": "/home/deploy/payarc.com/app/Containers/Refund/Tasks/CheckAmountTask.php",
         "line": 39    }
     }

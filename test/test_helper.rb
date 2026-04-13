@@ -151,6 +151,14 @@ module ActiveMerchant
     end
 
     def credit_card(number = '4242424242424242', options = {})
+      # Support `credit_card(number: 4111...)` calling convention: when a Hash is
+      # passed as the first positional arg, treat it as options and pull `number`
+      # out of it. Without this, the Hash falls through to CreditCard.new where
+      # brand detection tries to match a regex against a Hash and blows up.
+      if number.is_a?(Hash)
+        options = number
+        number = options.delete(:number) || '4242424242424242'
+      end
       number = number.is_a?(Integer) ? number.to_s : number
       defaults = {
         number:,

@@ -160,7 +160,16 @@ module ActiveMerchant # :nodoc:
 
       def parse(body, action)
         response = {}
-        xml = REXML::Document.new(body)
+        # rexml 3.4+ raises ParseException on empty/malformed bodies (e.g., a
+        # gateway returning nothing). Return an empty response hash so the
+        # caller can surface an error rather than crashing.
+        return response if body.to_s.strip.empty?
+
+        xml = begin
+          REXML::Document.new(body)
+        rescue REXML::ParseException
+          return response
+        end
         root = (REXML::XPath.first(xml, "//#{action}Response") || REXML::XPath.first(xml, '//detail'))
 
         root.elements.to_a.each do |node|
