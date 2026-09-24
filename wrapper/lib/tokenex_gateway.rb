@@ -3,6 +3,7 @@ require 'active_support/core_ext/enumerable'
 require 'active_merchant'
 require 'json'
 require 'stringio'
+require 'zlib'
 require_relative 'config'
 require_relative 'version'
 require_relative 'error_utils'
@@ -86,14 +87,169 @@ module Utils
     end
   end
 
+  GZIP_MAGIC = "\x1F\x8B".b
+
+  # Net::HTTP's debug_output writes one "-> " line per socket read, and reads
+  # happen per-header-line and per-chunk for a chunked response -- so a single
+  # HTTP response turns into a dozen-plus noisy transcript lines: one per
+  # header, a hex chunk-size line, the chunk body, a trailing CRLF, all
+  # interleaved with unprefixed "reading N bytes.../read N bytes" trace lines
+  # that aren't part of the wire content at all.
+  #
+  # This collapses each response into exactly two lines: the concatenated
+  # status+header block, and the concatenated (de-chunked) body. Only "-> "
+  # (response) lines are touched -- outgoing "<- " request lines are already
+  # written by Net::HTTP as one dump for the request line+headers and one for
+  # the body, so there is nothing to condense there.
+  #
+  # Any parsing surprise (a header shape we don't recognise, an unexpected
+  # unprefixed line, anything) aborts condensing for that response and falls
+  # back to the original uncondensed lines -- this runs after the PSP call has
+  # already completed, so it must never be able to turn a successful
+  # transaction into a logged error.
+  STATUS_LINE_RE = /\AHTTP\/\d\.\d\s+\d{3}\b.*\r\n\z/
+  HEADER_LINE_RE = /\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+:\s.*\r\n\z/
+  CHUNK_SIZE_RE = /\A[0-9a-fA-F]+\r\n\z/
+  TRACE_NOISE_RE = /\A(?:reading|read) \d+ bytes/
+
+  def condense_response_blocks(transcript)
+    lines = transcript.each_line.to_a
+    out = []
+    i = 0
+
+    while i < lines.length
+      content = response_line_content(lines[i])
+
+      unless content && content.match?(STATUS_LINE_RE)
+        out << lines[i]
+        i += 1
+        next
+      end
+
+      block = condense_one_response_block(lines, i)
+      if block
+        out.concat(block[:emitted])
+        i = block[:next_index]
+      else
+        out << lines[i]
+        i += 1
+      end
+    end
+
+    out.join
+  rescue StandardError
+    transcript
+  end
+
+  def response_line_content(line)
+    match = line.match(/\A-> (".*")(\r?\n)?\z/m)
+    return nil unless match
+
+    # Force ASCII-8BIT: a gzip'd chunk's undumped content is raw binary, not
+    # valid UTF-8, and matching a UTF-8 Regexp against a UTF-8-tagged invalid
+    # string raises ArgumentError. Every regex used against this content here
+    # is ASCII-only, so an ASCII-8BIT match is always safe regardless of what
+    # the underlying bytes are.
+    match[1].undump.b
+  rescue StandardError
+    nil
+  end
+
+  def condense_one_response_block(lines, start_index)
+    header_parts = []
+    i = start_index
+
+    while (content = response_line_content(lines[i]))
+      i += 1
+      break if content == "\r\n"
+
+      return nil unless content.match?(STATUS_LINE_RE) || content.match?(HEADER_LINE_RE)
+
+      header_parts << content
+    end
+    return nil if header_parts.empty?
+
+    headers_combined = header_parts.join
+    chunked = headers_combined.match?(/^Transfer-Encoding:\s*chunked/i)
+    body_bytes = String.new(encoding: Encoding::ASCII_8BIT)
+
+    loop do
+      break if i >= lines.length
+
+      if lines[i].match?(TRACE_NOISE_RE)
+        i += 1
+        next
+      end
+
+      content = response_line_content(lines[i])
+      break unless content
+
+      if chunked && content.match?(CHUNK_SIZE_RE)
+        i += 1
+        if content.strip == '0'
+          # Terminal chunk: consume any trailing CRLF-only line(s) -- the
+          # trailer section terminator -- so they don't leak through as
+          # trailing noise after the body block.
+          i += 1 while i < lines.length && response_line_content(lines[i]) == "\r\n"
+          break
+        end
+
+        next
+      end
+
+      if chunked && content == "\r\n"
+        i += 1
+        next
+      end
+
+      body_bytes << content.b
+      i += 1
+    end
+
+    emitted = []
+    emitted << "-> #{headers_combined.dump}\n"
+    emitted << "-> #{body_bytes.dump}\n" unless body_bytes.empty?
+    { emitted: emitted, next_index: i }
+  end
+
+  # Net::HTTP's debug_output dumps raw wire bytes before any Content-Encoding
+  # decompression happens, so a gzip'd PSP response shows up as unreadable
+  # binary (String#dump-escaped). Runs after condense_response_blocks, so the
+  # "-> \"...\"" line it sees is already the fully reassembled (de-chunked)
+  # body -- a gzip stream spanning multiple chunks now inflates correctly too.
+  # Left untouched (and safe) if the bytes aren't gzip.
+  def inflate_gzip_lines(transcript)
+    transcript.each_line.map do |line|
+      match = line.match(/\A(<-|->) (".*")(\r?\n)?\z/m)
+      next line unless match
+
+      begin
+        raw = match[2].undump.b
+        next line unless raw.start_with?(GZIP_MAGIC)
+
+        inflated = Zlib::GzipReader.new(StringIO.new(raw)).read
+        "#{match[1]} #{inflated.dump}#{match[3]}"
+      rescue StandardError
+        line
+      end
+    end.join
+  end
+
   # Net::HTTP's debug_output prefixes outgoing lines with "<- " and incoming
   # lines with "-> "; relabel those so a wiredump transcript reads clearly.
-  def annotate_transcript(transcript)
+  #
+  # The transcript is multi-line -- one line per wire read -- but log() writes
+  # it as a single Message: value on the surrounding log_entry. Since that
+  # entry (and its Reference:) only prefixes the FIRST physical line, every
+  # other request/response line in the file has no reference on it at all,
+  # making a multi-transaction log impossible to attribute. Stamping the
+  # reference onto each annotated line here fixes that at the source.
+  def annotate_transcript(transcript, reference)
     transcript.each_line.map do |line|
       if line.start_with?('<- ')
-        "Request sent by IXOPAY: #{line.delete_prefix('<- ')}"
+        "Reference:#{reference} Request sent by IXOPAY: #{line.delete_prefix('<- ')}"
       elsif line.start_with?('-> ')
-        "Response recieved by IXOPAY: #{line.delete_prefix('-> ')}"
+        "Reference:#{reference} Response recieved by IXOPAY: #{line.delete_prefix('-> ')}"
       else
         line
       end
@@ -233,7 +389,18 @@ post '/process', provides: :json do
       json_post = JSON.parse(body)
 
       request_info[:token_ex_id] = json_post['tokenex_id'] unless json_post['tokenex_id'].nil?
-      request_info[:reference] = json_post['ref'].nil? ? "I#{SecureRandom.hex(16)}" : json_post['ref']
+      # PSv2 sends its own per-request reference number (generated up-front in
+      # ProcessTransactionAuthMiddleware, and the same value returned to the API
+      # caller) as TransactionRequestBody.RefNum, serialized to JSON as "ref_num"
+      # -- see TokenEx.PaymentServices/Models/Requests/ProcessTransaction/
+      # TransactionRequestBody.cs. This previously read 'ref', a key PSv2 never
+      # sends, so request_info[:reference] always fell through to a locally
+      # generated ID with no relationship to PSv2's own reference number --
+      # making it impossible to correlate a wrapper log entry back to the PSv2
+      # request/response that produced it. 'ref' is still accepted as a fallback
+      # for any caller that isn't PSv2.
+      incoming_ref = json_post['ref_num'] || json_post['ref']
+      request_info[:reference] = incoming_ref.nil? ? "I#{SecureRandom.hex(16)}" : incoming_ref
 
       log_request = JSON.parse(JSON.generate(json_post))
 
@@ -441,8 +608,10 @@ post '/process', provides: :json do
       # Debug logging
       if debug_wiredump
         transcript = debug_wiredump.string
+        transcript = condense_response_blocks(transcript)
+        transcript = inflate_gzip_lines(transcript)
         transcript = am_gateway.scrub(transcript) if am_gateway.supports_scrubbing?
-        transcript = annotate_transcript(transcript)
+        transcript = annotate_transcript(transcript, request_info[:reference])
         log(request_info, 'Raw Transcript', transcript)
         puts "LogType:RawTranscript TokenExId:#{request_info[:token_ex_id]} Reference:#{request_info[:reference]} Message:#{transcript}"
       end
