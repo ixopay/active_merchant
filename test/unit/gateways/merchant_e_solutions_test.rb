@@ -532,6 +532,129 @@ class MerchantESolutionsTest < Test::Unit::TestCase
   end
 
   # ------------------------------------------------------------------
+  # Multiple Level 3 line items -- MeS expects the parameter REPEATED,
+  # once per item. Spec: American Express Level 3 examples.
+  # ------------------------------------------------------------------
+
+  def test_multiple_amex_line_items_emit_repeated_params
+    items = ['A<|>1<|>0.00', 'B<|>1<|>0.00', 'C<|>1<|>0.00']
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(amex_line_item: items, line_item_count: '3'))
+    end.check_request do |_method, _endpoint, data, _headers|
+      params = data.split('&').select { |p| p.start_with?('amex_line_item=') }
+      assert_equal(3, params.size)
+      assert_equal(items, params.map { |p| CGI.unescape(p.split('=', 2).last) })
+      assert_match(/line_item_count=3/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  # Each element is escaped on its own, so the delimiter survives per item.
+  def test_multiple_line_items_are_escaped_individually
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(amex_line_item: ['A<|>1<|>0.00', 'B<|>2<|>9.99']))
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_match(/amex_line_item=A%3C%7C%3E1%3C%7C%3E0\.00/, data)
+      assert_match(/amex_line_item=B%3C%7C%3E2%3C%7C%3E9\.99/, data)
+      # The separator between the two params must be a REAL '&', not %26.
+      assert_no_match(/%26amex_line_item/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_array_of_hashes_builds_each_composite
+    items = [
+      { description: 'Teton Pullover', quantity: '1', unit_cost: '0.00' },
+      { description: 'Bruno Compete',  quantity: '2', unit_cost: '4.65' }
+    ]
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(amex_line_item: items))
+    end.check_request do |_method, _endpoint, data, _headers|
+      got = data.split('&').select { |p| p.start_with?('amex_line_item=') }.
+            map { |p| CGI.unescape(p.split('=', 2).last) }
+      assert_equal ['Teton Pullover<|>1<|>0.00', 'Bruno Compete<|>2<|>4.65'], got
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_multiple_visa_line_items
+    items = [
+      '999999<|>drill<|>ABC<|>1<|>EA<|>4.75<|>0.00<|>0<|>0.50<|>4.25<|>D',
+      '999999<|>saw<|>DEF<|>2<|>EA<|>1.00<|>0.00<|>0<|>0.00<|>2.00<|>D'
+    ]
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(visa_line_item: items))
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_equal(2, data.split('&').count { |p| p.start_with?('visa_line_item=') })
+    end.respond_with(successful_purchase_response)
+  end
+
+  # A single item must still emit exactly one parameter -- no regression.
+  def test_single_line_item_still_emits_one_param
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(amex_line_item: 'SAW<|>1<|>4.65'))
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_equal(1, data.split('&').count { |p| p.start_with?('amex_line_item=') })
+      assert_match(%r{amex_line_item=SAW%3C%7C%3E1%3C%7C%3E4\.65}, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  # ------------------------------------------------------------------
+  # invoice_number: explicit value wins over order_id, and the cap is the
+  # spec's AN(20) rather than the 17 this adapter used to apply.
+  # ------------------------------------------------------------------
+
+  def test_explicit_invoice_number_wins_over_order_id
+    opts = @options.merge(invoice_number: '1234567890', order_id: 'e7f1e98c03f5cbeb8ad41f9c2e5b7a31')
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, opts)
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_match(/invoice_number=1234567890/, data)
+      assert_no_match(/invoice_number=e7f1e98c03f5cbeb8/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_order_id_still_used_when_no_invoice_number
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(order_id: 'ORDER-123'))
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_match(/invoice_number=ORDER123/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  # MeS accepts AN(20); error 103 is 'Confirm invoice_number is 20 or fewer
+  # characters'. A 20-char value must survive intact.
+  def test_invoice_number_allows_full_twenty_characters
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(invoice_number: 'ABCDEFGHIJ1234567890'))
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_match(/invoice_number=ABCDEFGHIJ1234567890/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_invoice_number_truncated_at_twenty
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(invoice_number: 'ABCDEFGHIJ1234567890EXTRA'))
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_match(/invoice_number=ABCDEFGHIJ1234567890(&|$)/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_invoice_number_strips_special_characters
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge(invoice_number: 'INV/2026-001'))
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_match(/invoice_number=INV2026001/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_invoice_number_omitted_when_neither_supplied
+    opts = @options.except(:order_id)
+    stub_comms(@gateway, :ssl_request) do
+      @gateway.purchase(@amount, @credit_card, opts)
+    end.check_request do |_method, _endpoint, data, _headers|
+      assert_no_match(/invoice_number=/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  # ------------------------------------------------------------------
   # Certification payload regression guards
   # Reproduce the exact param sets from the MeS Trident test script so a
   # future refactor cannot silently drop a required certification field.

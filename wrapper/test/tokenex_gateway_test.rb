@@ -126,7 +126,7 @@ class TokenExGatewayTest < Minitest::Test
   def test_process_authorize_with_bogus_gateway
     payload = {
       'tokenex_id' => '1234567890',
-      'ref' => 'test_ref_123',
+      'ref_num' => 'test_ref_123',
       'gateway' => { 'name' => 'BogusGateway' },
       'transaction' => { 'action' => 'authorize', 'amount' => 100 },
       'credit_card' => {
@@ -232,7 +232,7 @@ class TokenExGatewayTest < Minitest::Test
 
     payload = {
       'tokenex_id' => '1234567890',
-      'ref' => 'test_ref_debug',
+      'ref_num' => 'test_ref_debug',
       'gateway' => { 'name' => 'BogusGateway' },
       'transaction' => { 'action' => 'authorize', 'amount' => 100 },
       'credit_card' => {
@@ -252,6 +252,49 @@ class TokenExGatewayTest < Minitest::Test
     TokenExGateway::DEBUG_TOKENEXIDS.replace(original)
   end
 
+  # Regression guard: PSv2 sends its reference number as ref_num (see
+  # TransactionRequestBody.RefNum -> JsonProperty("ref_num")). The wrapper
+  # used to read 'ref', a key PSv2 never sends, so request_info[:reference]
+  # always fell back to a locally generated ID with no relationship to PSv2's
+  # own reference number -- silently breaking correlation between a wrapper
+  # log entry and the PSv2 request/response that produced it.
+  def test_reference_read_from_ref_num_matching_psv2_payload_shape
+    payload = {
+      'tokenex_id' => '1234567890',
+      'ref_num' => 'psv2-generated-reference-42',
+      'gateway' => { 'name' => 'BogusGateway' },
+      'transaction' => { 'action' => 'authorize', 'amount' => 100 },
+      'credit_card' => {
+        'first_name' => 'Test', 'last_name' => 'User', 'number' => '1',
+        'month' => '9', 'year' => (Time.now.year + 1).to_s, 'verification_value' => '123'
+      }
+    }
+    TokenExGateway::DEBUG_TOKENEXIDS.push('1234567890')
+    post '/process', payload.to_json, { 'CONTENT_TYPE' => 'application/json' }
+    log = File.read(TokenExGateway::LOG_FILE)
+    assert_includes log, 'Reference:psv2-generated-reference-42'
+  ensure
+    TokenExGateway::DEBUG_TOKENEXIDS.delete('1234567890')
+  end
+
+  def test_reference_falls_back_to_generated_id_when_neither_key_present
+    payload = {
+      'tokenex_id' => '1234567890',
+      'gateway' => { 'name' => 'BogusGateway' },
+      'transaction' => { 'action' => 'authorize', 'amount' => 100 },
+      'credit_card' => {
+        'first_name' => 'Test', 'last_name' => 'User', 'number' => '1',
+        'month' => '9', 'year' => (Time.now.year + 1).to_s, 'verification_value' => '123'
+      }
+    }
+    TokenExGateway::DEBUG_TOKENEXIDS.push('1234567890')
+    post '/process', payload.to_json, { 'CONTENT_TYPE' => 'application/json' }
+    log = File.read(TokenExGateway::LOG_FILE)
+    assert_match(/Reference:I[0-9a-f]{32}/, log)
+  ensure
+    TokenExGateway::DEBUG_TOKENEXIDS.delete('1234567890')
+  end
+
   def test_annotate_transcript_labels_sent_and_received_lines
     utils = Class.new { include Utils }.new
     transcript = <<~TRANSCRIPT
@@ -260,11 +303,193 @@ class TokenExGatewayTest < Minitest::Test
       -> "HTTP/1.1 201 Created\\r\\n"
     TRANSCRIPT
 
-    annotated = utils.annotate_transcript(transcript)
+    annotated = utils.annotate_transcript(transcript, 'ref-abc123')
 
     assert_includes annotated, 'opening connection to api-demo.airwallex.com:443...'
-    assert_includes annotated, 'Request sent by IXOPAY: "POST /api/v1/pa/payment_intents/create HTTP/1.1\r\n\r\n"'
+    assert_includes annotated,
+                     'Request sent by IXOPAY: "POST /api/v1/pa/payment_intents/create HTTP/1.1\r\n\r\n"'
     assert_includes annotated, 'Response recieved by IXOPAY: "HTTP/1.1 201 Created\r\n"'
+  end
+
+  # Guards the actual bug: log() only stamps Reference: on the FIRST physical
+  # line of a multi-line transcript, so every request/response line after
+  # that had no reference at all in a multi-transaction log file. Every
+  # annotated line must carry it independently.
+  def test_annotate_transcript_stamps_reference_on_every_line
+    utils = Class.new { include Utils }.new
+    transcript = <<~TRANSCRIPT
+      <- "POST /mes-api/tridentApi HTTP/1.1\\r\\n\\r\\n"
+      -> "HTTP/1.1 200 OK\\r\\n"
+      -> "transaction_id=1&error_code=000\\r\\n"
+    TRANSCRIPT
+
+    annotated = utils.annotate_transcript(transcript, 'ref-abc123')
+
+    lines = annotated.lines.reject { |l| l.strip.empty? }
+    assert_equal 3, lines.size
+    lines.each { |line| assert_match(/\AReference:ref-abc123 /, line) }
+  end
+
+  def test_annotate_transcript_leaves_unlabeled_lines_without_reference
+    utils = Class.new { include Utils }.new
+    transcript = "opening connection to api-demo.airwallex.com:443...\n"
+
+    annotated = utils.annotate_transcript(transcript, 'ref-abc123')
+
+    refute_includes annotated, 'Reference:'
+  end
+
+  # Builds one already-annotated "-> " transcript line from real bytes, using
+  # String#dump to produce the escaped text (rather than hand-typed \r\n
+  # literals, which are error-prone to get right across quoting layers).
+  def dump_line(bytes)
+    "-> #{bytes.dump}\n"
+  end
+
+  # Reproduces the real reported case: a chunked, gzip'd HTTP response comes
+  # out of Net::HTTP's debug_output as a dozen-plus lines -- one per header,
+  # one hex chunk-size line, the chunk body, a trailing CRLF, interleaved with
+  # unprefixed "reading N bytes.../read N bytes" trace noise. This must
+  # collapse to exactly two "-> " lines: the combined header block, and the
+  # combined (de-chunked) body.
+  def test_condense_response_blocks_collapses_chunked_response_to_two_lines
+    utils = Class.new { include Utils }.new
+    gz = StringIO.new.tap { |io| w = Zlib::GzipWriter.new(io); w.write('transaction_id=1&error_code=000'); w.close }.string.b
+
+    lines = [
+      dump_line("HTTP/1.1 200 \r\n"),
+      dump_line("Date: Wed, 23 Sep 2026 22:10:45 GMT\r\n"),
+      dump_line("Content-Type: text/plain\r\n"),
+      dump_line("Transfer-Encoding: chunked\r\n"),
+      dump_line("Connection: close\r\n"),
+      dump_line("Content-Encoding: gzip\r\n"),
+      dump_line("\r\n"),
+      dump_line("#{gz.bytesize.to_s(16)}\r\n"),
+      "reading #{gz.bytesize} bytes...\n",
+      dump_line(gz),
+      "read #{gz.bytesize} bytes\n",
+      "reading 2 bytes...\n",
+      dump_line("\r\n"),
+      "read 2 bytes\n",
+      dump_line("0\r\n"),
+      dump_line("\r\n")
+    ]
+    transcript = lines.join
+
+    condensed = utils.condense_response_blocks(transcript)
+    condensed_lines = condensed.lines
+    assert_equal 2, condensed_lines.size, "expected exactly 2 lines, got:\n#{condensed}"
+    assert_match(/\AHTTP\/1\.1 200/, condensed_lines[0].match(/-> "(.*)"/m)[1])
+    assert_includes condensed_lines[0], 'Transfer-Encoding: chunked'
+    assert_includes condensed_lines[0], 'Content-Encoding: gzip'
+    refute_includes condensed, 'reading '
+    refute_includes condensed, 'read '
+
+    inflated = utils.inflate_gzip_lines(condensed)
+    final = utils.annotate_transcript(inflated, 'ref-42')
+    final_lines = final.lines
+    assert_equal 2, final_lines.size
+    assert_match(/\AReference:ref-42 Response recieved by IXOPAY: "HTTP\/1\.1 200/, final_lines[0])
+    assert_equal(
+      "Reference:ref-42 Response recieved by IXOPAY: #{'transaction_id=1&error_code=000'.dump}\n",
+      final_lines[1]
+    )
+  end
+
+  # The gzip stream can legitimately span more than one chunk. Before
+  # reassembly, inflate_gzip_lines only ever saw one chunk at a time and could
+  # never have inflated either half. condense_response_blocks reassembles the
+  # full body first, so this now inflates correctly.
+  def test_condense_response_blocks_reassembles_gzip_split_across_chunks
+    utils = Class.new { include Utils }.new
+    gz = StringIO.new.tap { |io| w = Zlib::GzipWriter.new(io); w.write('a' * 200); w.close }.string.b
+    half = gz.bytesize / 2
+    chunk_a = gz.byteslice(0, half)
+    chunk_b = gz.byteslice(half, gz.bytesize - half)
+
+    lines = [
+      dump_line("HTTP/1.1 200 \r\n"),
+      dump_line("Transfer-Encoding: chunked\r\n"),
+      dump_line("Content-Encoding: gzip\r\n"),
+      dump_line("\r\n"),
+      dump_line("#{chunk_a.bytesize.to_s(16)}\r\n"),
+      dump_line(chunk_a),
+      dump_line("\r\n"),
+      dump_line("#{chunk_b.bytesize.to_s(16)}\r\n"),
+      dump_line(chunk_b),
+      dump_line("\r\n"),
+      dump_line("0\r\n"),
+      dump_line("\r\n")
+    ]
+    transcript = lines.join
+
+    condensed = utils.condense_response_blocks(transcript)
+    inflated = utils.inflate_gzip_lines(condensed)
+
+    assert_includes inflated, 'a' * 200
+  end
+
+  def test_condense_response_blocks_handles_non_chunked_response
+    utils = Class.new { include Utils }.new
+    lines = [
+      dump_line("HTTP/1.1 200 \r\n"),
+      dump_line("Content-Type: application/json\r\n"),
+      dump_line("Content-Length: 13\r\n"),
+      dump_line("\r\n"),
+      dump_line("{\"ok\":true}\n")
+    ]
+    transcript = lines.join
+
+    condensed = utils.condense_response_blocks(transcript)
+    condensed_lines = condensed.lines
+    assert_equal 2, condensed_lines.size
+    body_content = utils.send(:response_line_content, condensed_lines[1])
+    assert_equal %({"ok":true}) + "\n", body_content
+  end
+
+  # Must never be able to turn a completed, successful transaction into a
+  # logged error -- if anything about the shape is unrecognised, fall back to
+  # the original, uncondensed transcript rather than raising or corrupting it.
+  def test_condense_response_blocks_falls_back_safely_on_unexpected_shape
+    utils = Class.new { include Utils }.new
+    transcript = dump_line("HTTP/1.1 200 \r\n") + "-> \"this is not a header line at all\"\n"
+
+    result = utils.condense_response_blocks(transcript)
+
+    assert_equal transcript, result
+  end
+
+  def test_condense_response_blocks_leaves_request_lines_untouched
+    utils = Class.new { include Utils }.new
+    transcript = "<- #{"POST /mes-api/tridentApi HTTP/1.1\r\nHost: x\r\n\r\n".dump}\n" \
+                 "<- #{'profile_id=x'.dump}\n"
+
+    assert_equal transcript, utils.condense_response_blocks(transcript)
+  end
+
+  def test_inflate_gzip_lines_decodes_gzipped_body_line
+    utils = Class.new { include Utils }.new
+    body = { 'result' => 'ok', 'message' => 'approved' }.to_json
+    gzipped = StringIO.new.tap do |io|
+      gz = Zlib::GzipWriter.new(io)
+      gz.write(body)
+      gz.close
+    end.string
+
+    transcript = "-> \"HTTP/1.1 200 OK\\r\\n\"\n-> #{gzipped.dump}\n"
+
+    inflated = utils.inflate_gzip_lines(transcript)
+
+    assert_includes inflated, 'approved'
+    assert_includes inflated, 'HTTP/1.1 200 OK'
+    refute_includes inflated, gzipped
+  end
+
+  def test_inflate_gzip_lines_leaves_non_gzip_content_untouched
+    utils = Class.new { include Utils }.new
+    transcript = "-> \"HTTP/1.1 200 OK\\r\\n\"\n-> \"{\\\"ok\\\":true}\"\n"
+
+    assert_equal transcript, utils.inflate_gzip_lines(transcript)
   end
 
   def test_stripe_metadata_conversion

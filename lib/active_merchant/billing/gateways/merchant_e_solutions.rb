@@ -225,11 +225,18 @@ module ActiveMerchant # :nodoc:
         end
       end
 
+      # MeS invoice_number is AN(20), 'No special characters' -- sending it obtains
+      # preferred interchange rates. Error code 103 is 'Confirm invoice_number is 20
+      # or fewer characters then retry request', which is where the 20 comes from.
+      #
+      # An explicit :invoice_number wins; otherwise fall back to :order_id, the
+      # ActiveMerchant convention. Before this, :invoice_number was ignored entirely
+      # and a caller supplying it silently got their :order_id instead.
       def add_invoice(post, options)
-        if options.has_key? :order_id
-          order_id = options[:order_id].to_s.gsub(/[^\w.]/, '')
-          post[:invoice_number] = truncate(order_id, 17)
-        end
+        source = options[:invoice_number] || options[:order_id]
+        return if source.nil?
+
+        post[:invoice_number] = truncate(source.to_s.gsub(/[^\w.]/, ''), 20)
       end
 
       def add_payment_source(post, creditcard_or_card_id, options)
@@ -305,11 +312,23 @@ module ActiveMerchant # :nodoc:
         end
       end
 
-      # A line item may be supplied either already MeS-formatted (a String, passed
-      # through untouched -- use this to send multiple items) or as a Hash, which is
-      # assembled into the brand-specific '<|>'-delimited composite. Hash keys may
-      # be symbols or strings and follow LINE_ITEM_FIELDS ordering.
+      # A line item may be supplied as:
+      #   * an Array  -- one entry per item; each entry is built by these same rules
+      #                  and post_data emits the parameter once per entry. This is the
+      #                  only way to send MULTIPLE line items (see below).
+      #   * a String  -- already MeS-formatted, passed through untouched.
+      #   * a Hash    -- assembled into the brand-specific '<|>'-delimited composite.
+      #                  Keys may be symbols or strings, in LINE_ITEM_FIELDS order.
+      #
+      # Multiple items: the spec requires the parameter REPEATED, once per item --
+      # 'amex_line_item=A<|>1<|>0.00&amex_line_item=B<|>1<|>0.00' (see the American
+      # Express Level 3 examples). Embedding '&amex_line_item=' inside a single String
+      # does NOT work: post_data percent-encodes each value, so the '&' and '=' arrive
+      # as %26 and %3D and MeS sees one parameter with a corrupt value. Pass an Array.
+      #
+      # Remember to set line_item_count to match the number of items.
       def build_line_item(key, value)
+        return value.map { |item| build_line_item(key, item) } if value.is_a?(Array)
         return value if value.is_a?(String)
 
         LINE_ITEM_FIELDS[key].map { |field| value[field] || value[field.to_s] }.
@@ -396,7 +415,13 @@ module ActiveMerchant # :nodoc:
         post[:profile_key] = @options[:password]
         post[:transaction_type] = action if action
 
-        post.merge(parameters).map { |key, value| "#{key}=#{CGI.escape(value.to_s)}" }.join('&')
+        # An Array value emits the parameter once per element, which is how MeS
+        # expects repeated fields such as multiple Level 3 line items. Every other
+        # value keeps its existing single-parameter behaviour, nil included.
+        post.merge(parameters).map { |key, value|
+          values = value.is_a?(Array) ? value : [value]
+          values.map { |v| "#{key}=#{CGI.escape(v.to_s)}" }.join('&')
+        }.join('&')
       end
     end
   end
