@@ -100,7 +100,7 @@ class AirwallexTest < Test::Unit::TestCase
     response = @gateway.purchase(@declined_amount, @declined_card, @options)
     assert_failure response
     assert_equal '14', response.error_code
-    assert_equal 'The card issuer declined this transaction. Please refer to the original response code.', response.message
+    assert_equal 'Invalid Card Number', response.message
   end
 
   def test_successful_authorize
@@ -119,7 +119,7 @@ class AirwallexTest < Test::Unit::TestCase
     response = @gateway.authorize(@declined_amount, @declined_card, @options.merge(auto_capture: false))
     assert_failure response
     assert_equal '14', response.error_code
-    assert_equal 'The card issuer declined this transaction. Please refer to the original response code.', response.message
+    assert_equal 'Invalid Card Number', response.message
   end
 
   def test_successful_authorize_with_return_url
@@ -402,7 +402,7 @@ class AirwallexTest < Test::Unit::TestCase
       unless endpoint == setup_endpoint
         assert_match(/"external_recurring_data\"/, data)
         assert_match(/"merchant_trigger_reason\":\"scheduled\"/, data)
-        assert_match(/"original_transaction_id\":null,/, data)
+        assert_no_match(/original_transaction_id/, data)
         assert_match(/"triggered_by\":\"customer\"/, data)
       end
     end.respond_with(successful_authorize_response)
@@ -416,7 +416,7 @@ class AirwallexTest < Test::Unit::TestCase
       unless endpoint == setup_endpoint
         assert_match(/"external_recurring_data\"/, data)
         assert_match(/"merchant_trigger_reason\":\"scheduled\"/, data)
-        assert_match(/"original_transaction_id\":null,/, data)
+        assert_no_match(/original_transaction_id/, data)
         assert_match(/"triggered_by\":\"customer\"/, data)
       end
     end.respond_with(successful_authorize_response)
@@ -447,7 +447,7 @@ class AirwallexTest < Test::Unit::TestCase
       unless endpoint == setup_endpoint
         assert_match(/"external_recurring_data\"/, data)
         assert_match(/"merchant_trigger_reason\":\"unscheduled\"/, data)
-        assert_match(/"original_transaction_id\":null,/, data)
+        assert_no_match(/original_transaction_id/, data)
         assert_match(/"triggered_by\":\"customer\"/, data)
       end
     end.respond_with(successful_authorize_response)
@@ -478,7 +478,7 @@ class AirwallexTest < Test::Unit::TestCase
       unless endpoint == setup_endpoint
         assert_match(/"external_recurring_data\"/, data)
         assert_match(/"merchant_trigger_reason\":\"scheduled\"/, data)
-        assert_match(/"original_transaction_id\":null,/, data)
+        assert_no_match(/original_transaction_id/, data)
         assert_match(/"triggered_by\":\"customer\"/, data)
       end
     end.respond_with(successful_authorize_response)
@@ -508,7 +508,7 @@ class AirwallexTest < Test::Unit::TestCase
       unless endpoint == setup_endpoint
         assert_match(/"external_recurring_data\"/, data)
         assert_match(/"merchant_trigger_reason\":\"scheduled\"/, data)
-        assert_match(/"original_transaction_id\":null,/, data)
+        assert_no_match(/original_transaction_id/, data)
         assert_match(/"triggered_by\":\"customer\"/, data)
       end
     end.respond_with(successful_authorize_response)
@@ -531,9 +531,332 @@ class AirwallexTest < Test::Unit::TestCase
 
   def test_failed_mit_with_unapproved_visa_ntid
     @gateway.expects(:ssl_post).returns(failed_ntid_response)
-    assert_raise ArgumentError do
-      @gateway.authorize(@amount, @credit_card, @options.merge!({ stored_credential: @stored_credential_cit_options }))
+
+    response = @gateway.authorize(@amount, @credit_card, @options.merge!({ stored_credential: @stored_credential_cit_options }))
+    assert_failure response
+    assert_equal 'validation_error', response.error_code
+    assert_equal 'external_recurring_data.original_transaction_id should be 13-15 characters long', response.message
+  end
+
+  def test_failed_payment_intent_returns_failed_response_without_confirming
+    @gateway.expects(:ssl_post).once.returns(failed_currency_response)
+
+    response = @gateway.purchase(@amount, @credit_card, @options.merge(currency: 'JPY'))
+    assert_failure response
+    assert_equal 'validation_error', response.error_code
+    assert_equal 'JPY is not supported for these transactions.', response.message
+  end
+
+  def test_failed_purchase_with_insufficient_funds
+    @gateway.expects(:ssl_post).times(2).returns(successful_payment_intent_response, failed_insufficient_funds_response)
+
+    response = @gateway.purchase(8051, @credit_card, @options)
+    assert_failure response
+    assert_equal '51', response.error_code
+    assert_equal 'Insufficient Funds', response.message
+  end
+
+  def test_unmapped_issuer_decline_keeps_airwallex_message
+    @gateway.expects(:ssl_post).times(2).returns(successful_payment_intent_response, failed_unmapped_decline_response)
+
+    response = @gateway.purchase(8888, @credit_card, @options)
+    assert_failure response
+    assert_equal 'The card issuer declined this transaction.', response.message
+  end
+
+  def test_test_mode_mit_keeps_supplied_network_transaction_id_for_brands_without_test_id
+    amex = credit_card('3706 3680 3809 394', brand: 'american_express', verification_value: '1234')
+    @stored_credential_mit_options[:network_transaction_id] = '000000000000001'
+
+    stub_comms do
+      @gateway.purchase(@amount, amex, @options.merge(stored_credential: @stored_credential_mit_options))
+    end.check_request do |endpoint, data, _headers|
+      assert_match(/"original_transaction_id\":\"000000000000001\"/, data) unless endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_zero_decimal_currency_amounts
+    stub_comms do
+      @gateway.purchase(100000, @credit_card, @options.merge(currency: 'JPY'))
+    end.check_request do |endpoint, data, _headers|
+      if endpoint == setup_endpoint
+        assert_match(/"amount\":\"1000\"/, data)
+        assert_match(/"currency\":\"JPY\"/, data)
+      end
+    end.respond_with(successful_purchase_response)
+
+    stub_comms do
+      @gateway.capture(100000, 'int_hkdmtp6bpg79nqimh2z', currency: 'JPY')
+    end.check_request do |_endpoint, data, _headers|
+      assert_match(/"amount\":\"1000\"/, data)
+    end.respond_with(successful_capture_response)
+
+    stub_comms do
+      @gateway.refund(100000, 'int_hkdmtp6bpg79nqimh2z', currency: 'JPY')
+    end.check_request do |_endpoint, data, _headers|
+      assert_match(/"amount\":\"1000\"/, data)
+    end.respond_with(successful_refund_response)
+  end
+
+  def test_two_decimal_currency_amounts_unchanged
+    stub_comms do
+      @gateway.purchase(1025, @credit_card, @options.merge(currency: 'USD'))
+    end.check_request do |endpoint, data, _headers|
+      assert_match(/"amount\":\"10.25\"/, data) if endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_billing_falls_back_to_billing_address_name_email_and_phone
+    card = credit_card('4111111111111111', first_name: nil, last_name: nil)
+    billing_address = address(name: 'Jane Q Doe', email: 'jane@example.com', phone: '5555555555')
+
+    stub_comms do
+      @gateway.purchase(@amount, card, billing_address:)
+    end.check_request do |endpoint, data, _headers|
+      unless endpoint == setup_endpoint
+        billing = JSON.parse(data)['payment_method']['card']['billing']
+        assert_equal 'Jane Q', billing['first_name']
+        assert_equal 'Doe', billing['last_name']
+        assert_equal 'jane@example.com', billing['email']
+        assert_equal '5555555555', billing['phone']
+        assert_equal '456 My Street', billing['address']['street']
+      end
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_top_level_email_takes_precedence_over_billing_address_email
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, email: 'top@example.com', billing_address: address(email: 'billing@example.com'))
+    end.check_request do |endpoint, data, _headers|
+      assert_equal 'top@example.com', JSON.parse(data)['payment_method']['card']['billing']['email'] unless endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_no_billing_sent_without_any_name
+    card = credit_card('4111111111111111', first_name: nil, last_name: nil)
+
+    stub_comms do
+      @gateway.purchase(@amount, card, billing_address: address(name: nil))
+    end.check_request do |endpoint, data, _headers|
+      assert_nil JSON.parse(data)['payment_method']['card']['billing'] unless endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_cvc_sent_when_present
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, @options)
+    end.check_request do |endpoint, data, _headers|
+      assert_equal @credit_card.verification_value, JSON.parse(data)['payment_method']['card']['cvc'] unless endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_cvc_omitted_when_blank
+    [nil, ''].each do |blank_cvv|
+      card = credit_card('4111111111111111', verification_value: blank_cvv)
+
+      stub_comms do
+        @gateway.purchase(@amount, card, @options)
+      end.check_request do |endpoint, data, _headers|
+        refute JSON.parse(data)['payment_method']['card'].key?('cvc') unless endpoint == setup_endpoint
+      end.respond_with(successful_purchase_response)
     end
+  end
+
+  def test_shipping_phone_falls_back_to_phone
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, @options.merge(shipping_address: address(phone: '5551234567')))
+    end.check_request do |endpoint, data, _headers|
+      assert_equal '5551234567', JSON.parse(data)['order']['shipping']['phone_number'] if endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_shipping_phone_number_takes_precedence_over_phone
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, @options.merge(shipping_address: address(phone: '5551234567', phone_number: '5559876543')))
+    end.check_request do |endpoint, data, _headers|
+      assert_equal '5559876543', JSON.parse(data)['order']['shipping']['phone_number'] if endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_no_shipping_phone_sent_without_one
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, @options.merge(shipping_address: address(phone: nil)))
+    end.check_request do |endpoint, data, _headers|
+      refute JSON.parse(data)['order']['shipping'].key?('phone_number') if endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_purchase_sends_enhanced_scheme_data
+    options = @options.merge(enhanced_scheme_data: {
+      customer: { first_name: 'Jim', last_name: 'Smith', reference: 'CUSTOMER-REF-1' },
+      customer_tax_identifier: 'CUST-TAX-1',
+      merchant_tax_identifier: 'MERCHANT-TAX-1',
+      invoice_reference: 'INV-001',
+      vat_invoice_reference: 'VAT-001',
+      summary_commodity_code: '4321',
+      total_tax_amount: 150,
+      national_tax_amount: 100,
+      local_tax_amount: 50,
+      duty_amount: 25,
+      shipping: {
+        date: '2025-01-15',
+        fee_amount: 500,
+        from_postcode: '90210',
+        address: { country_code: 'US', street: '1 Main St', city: 'Ottawa', postcode: 'K1C2N6', state: 'ON' }
+      },
+      products: [
+        {
+          code: 'SKU-1',
+          commodity_code: '44121700',
+          description: 'Blue widget',
+          quantity: 2,
+          unit: 'EA',
+          unit_price: 1000,
+          total_amount: 2000,
+          tax_percent: 8.5,
+          total_tax_amount: 170,
+          discount_amount: 100
+        }
+      ]
+    })
+
+    response = stub_comms do
+      @gateway.purchase(@amount, @credit_card, options)
+    end.check_request do |endpoint, data, _headers|
+      next unless endpoint == setup_endpoint
+
+      scheme_data = JSON.parse(data)['additional_info']['enhanced_scheme_data']
+
+      assert_equal 'Jim', scheme_data['customer']['first_name']
+      assert_equal 'Smith', scheme_data['customer']['last_name']
+      assert_equal 'CUSTOMER-REF-1', scheme_data['customer']['reference']
+      assert_equal 'CUST-TAX-1', scheme_data['customer_tax_identifier']
+      assert_equal 'MERCHANT-TAX-1', scheme_data['merchant_tax_identifier']
+      assert_equal 'INV-001', scheme_data['invoice_reference']
+      assert_equal 'VAT-001', scheme_data['vat_invoice_reference']
+      assert_equal '4321', scheme_data['summary_commodity_code']
+      assert_equal 1.5, scheme_data['total_tax_amount']
+      assert_equal 1.0, scheme_data['national_tax_amount']
+      assert_equal 0.5, scheme_data['local_tax_amount']
+      assert_equal 0.25, scheme_data['duty_amount']
+
+      assert_equal '2025-01-15', scheme_data['shipping']['date']
+      assert_equal 5.0, scheme_data['shipping']['fee_amount']
+      assert_equal '90210', scheme_data['shipping']['from_postcode']
+      assert_equal 'US', scheme_data['shipping']['address']['country_code']
+      assert_equal '1 Main St', scheme_data['shipping']['address']['street']
+      assert_equal 'Ottawa', scheme_data['shipping']['address']['city']
+      assert_equal 'K1C2N6', scheme_data['shipping']['address']['postcode']
+      assert_equal 'ON', scheme_data['shipping']['address']['state']
+
+      product = scheme_data['products'][0]
+      assert_equal 'SKU-1', product['code']
+      assert_equal '44121700', product['commodity_code']
+      assert_equal 'Blue widget', product['description']
+      assert_equal 2, product['quantity']
+      assert_equal 'EA', product['unit']
+      assert_equal 10.0, product['unit_price']
+      assert_equal 20.0, product['total_amount']
+      assert_equal 8.5, product['tax_percent']
+      assert_equal 1.7, product['total_tax_amount']
+      assert_equal 1.0, product['discount_amount']
+    end.respond_with(successful_purchase_response)
+
+    assert_success response
+  end
+
+  def test_enhanced_scheme_data_truncated_to_scheme_limits
+    options = @options.merge(enhanced_scheme_data: {
+      customer: { reference: 'x' * 30 },
+      customer_tax_identifier: 'x' * 30,
+      merchant_tax_identifier: 'x' * 30,
+      invoice_reference: 'x' * 30,
+      vat_invoice_reference: 'x' * 30,
+      shipping: { from_postcode: 'x' * 30, address: { postcode: 'x' * 30, city: 'x' * 200 } },
+      products: [{ code: 'x' * 30, commodity_code: 'x' * 30, description: 'x' * 60, unit: 'x' * 30 }]
+    })
+
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, options)
+    end.check_request do |endpoint, data, _headers|
+      next unless endpoint == setup_endpoint
+
+      scheme_data = JSON.parse(data)['additional_info']['enhanced_scheme_data']
+
+      assert_equal 17, scheme_data['customer']['reference'].length
+      assert_equal 13, scheme_data['customer_tax_identifier'].length
+      assert_equal 20, scheme_data['merchant_tax_identifier'].length
+      assert_equal 17, scheme_data['invoice_reference'].length
+      assert_equal 15, scheme_data['vat_invoice_reference'].length
+      assert_equal 10, scheme_data['shipping']['from_postcode'].length
+      assert_equal 10, scheme_data['shipping']['address']['postcode'].length
+      assert_equal 100, scheme_data['shipping']['address']['city'].length
+
+      product = scheme_data['products'][0]
+      assert_equal 12, product['code'].length
+      assert_equal 12, product['commodity_code'].length
+      assert_equal 26, product['description'].length
+      assert_equal 12, product['unit'].length
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_enhanced_scheme_data_passes_decimal_amounts_through_untouched
+    options = @options.merge(enhanced_scheme_data: {
+      total_tax_amount: 12.34,
+      products: [{ unit_price: 5.67, total_amount: '11.34' }]
+    })
+
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, options)
+    end.check_request do |endpoint, data, _headers|
+      next unless endpoint == setup_endpoint
+
+      scheme_data = JSON.parse(data)['additional_info']['enhanced_scheme_data']
+      assert_equal 12.34, scheme_data['total_tax_amount']
+      assert_equal 5.67, scheme_data['products'][0]['unit_price']
+      assert_equal '11.34', scheme_data['products'][0]['total_amount']
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_enhanced_scheme_data_accepts_string_keys_and_activemerchant_address_keys
+    # The sidecar wrapper symbolizes top-level option keys but does not recurse
+    # into arrays, so nested product hashes arrive with string keys.
+    options = @options.merge(enhanced_scheme_data: {
+      'invoice_reference' => 'INV-9',
+      'shipping' => { 'address' => { 'country' => 'US', 'address1' => '2 Main St', 'zip' => '12345' } },
+      'products' => [{ 'code' => 'SKU-9', 'quantity' => 1 }]
+    })
+
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, options)
+    end.check_request do |endpoint, data, _headers|
+      next unless endpoint == setup_endpoint
+
+      scheme_data = JSON.parse(data)['additional_info']['enhanced_scheme_data']
+      assert_equal 'INV-9', scheme_data['invoice_reference']
+      assert_equal 'US', scheme_data['shipping']['address']['country_code']
+      assert_equal '2 Main St', scheme_data['shipping']['address']['street']
+      assert_equal '12345', scheme_data['shipping']['address']['postcode']
+      assert_equal 'SKU-9', scheme_data['products'][0]['code']
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_no_enhanced_scheme_data_sent_when_not_provided
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, @options)
+    end.check_request do |endpoint, data, _headers|
+      assert_nil JSON.parse(data)['additional_info'] if endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_enhanced_scheme_data_is_not_sent_on_confirm
+    options = @options.merge(enhanced_scheme_data: { invoice_reference: 'INV-1' })
+
+    stub_comms do
+      @gateway.purchase(@amount, @credit_card, options)
+    end.check_request do |endpoint, data, _headers|
+      assert_nil JSON.parse(data)['additional_info'] unless endpoint == setup_endpoint
+    end.respond_with(successful_purchase_response)
   end
 
   def test_scrub
@@ -610,6 +933,18 @@ class AirwallexTest < Test::Unit::TestCase
     %({"code":"not_found","message":"The requested endpoint does not exist [/api/v1/pa/payment_intents/12345/cancel]"})
   end
 
+  def failed_currency_response
+    %({"code":"validation_error","source":"currency","message":"JPY is not supported for these transactions."})
+  end
+
+  def failed_insufficient_funds_response
+    %({"code":"issuer_declined","message":"The card issuer declined this transaction. Please refer to the original response code.","provider_original_response_code":"51"})
+  end
+
+  def failed_unmapped_decline_response
+    %({"code":"issuer_declined","message":"The card issuer declined this transaction."})
+  end
+
   def failed_ntid_response
     %({"code":"validation_error","source":"external_recurring_data.original_transaction_id","message":"external_recurring_data.original_transaction_id should be 13-15 characters long"})
   end
@@ -619,6 +954,6 @@ class AirwallexTest < Test::Unit::TestCase
   end
 
   def setup_endpoint
-    'https://api-demo.airwallex.com/api/v1/pa/payment_intents/create'
+    'https://api.sandbox.airwallex.com/api/v1/pa/payment_intents/create'
   end
 end
