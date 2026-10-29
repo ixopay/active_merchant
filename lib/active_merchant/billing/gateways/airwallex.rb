@@ -1,13 +1,13 @@
 module ActiveMerchant # :nodoc:
   module Billing # :nodoc:
     class AirwallexGateway < Gateway
-      self.test_url = 'https://api-demo.airwallex.com/api/v1'
+      self.test_url = 'https://api.sandbox.airwallex.com/api/v1'
       self.live_url = 'https://pci-api.airwallex.com/api/v1'
 
       # per https://www.airwallex.com/docs/online-payments__overview, cards are accepted in all EU countries
       self.supported_countries = %w[AT AU BE BG CY CZ DE DK EE GR ES FI FR GB HK HR HU IE IT LT LU LV MT NL PL PT RO SE SG SI SK]
       self.default_currency = 'AUD'
-      self.supported_cardtypes = %i[visa master]
+      self.supported_cardtypes = %i[visa master american_express]
 
       self.homepage_url = 'https://airwallex.com/'
       self.display_name = 'Airwallex'
@@ -27,6 +27,45 @@ module ActiveMerchant # :nodoc:
         master: 'MCC123ABC0101'
       }
 
+      # Level 2/Level 3 interchange data, sent as additional_info.enhanced_scheme_data
+      # on payment intent creation. Maximum lengths are enforced by Airwallex.
+      ENHANCED_SCHEME_DATA_LIMITS = {
+        customer_tax_identifier: 13,
+        invoice_reference: 17,
+        merchant_tax_identifier: 20,
+        vat_invoice_reference: 15
+      }
+
+      ENHANCED_SCHEME_DATA_AMOUNTS = %i[duty_amount local_tax_amount national_tax_amount total_tax_amount]
+
+      ENHANCED_SCHEME_DATA_PRODUCT_LIMITS = {
+        code: 12,
+        commodity_code: 12,
+        description: 26,
+        unit: 12
+      }
+
+      ENHANCED_SCHEME_DATA_PRODUCT_AMOUNTS = %i[discount_amount total_amount total_tax_amount unit_price]
+
+      ENHANCED_SCHEME_DATA_ADDRESS_LIMITS = {
+        city: 100,
+        postcode: 10,
+        state: 100,
+        street: 1000
+      }
+
+      # Airwallex returns the same generic message for every issuer decline, with the
+      # reason only in provider_original_response_code. These are the codes produced by
+      # the magic amounts in https://www.airwallex.com/docs/payments/test-and-go-live/test-card-numbers
+      ISSUER_DECLINE_MESSAGES = {
+        '05' => 'Do Not Honor',
+        '07' => 'Pick Up Card',
+        '14' => 'Invalid Card Number',
+        '51' => 'Insufficient Funds',
+        '59' => 'Suspected Fraud',
+        '100' => 'Deny'
+      }
+
       def initialize(options = {})
         requires!(options, :client_id, :client_api_key)
         @client_id = options[:client_id]
@@ -36,7 +75,10 @@ module ActiveMerchant # :nodoc:
       end
 
       def purchase(money, card, options = {})
-        payment_intent_id = create_payment_intent(money, options)
+        payment_intent = create_payment_intent(money, options)
+        return payment_intent unless payment_intent.success?
+
+        payment_intent_id = payment_intent.params['id']
         post = {
           'request_id' => request_id(options),
           'merchant_order_id' => merchant_order_id(options)
@@ -62,7 +104,7 @@ module ActiveMerchant # :nodoc:
         post = {
           'request_id' => request_id(options),
           'merchant_order_id' => merchant_order_id(options),
-          'amount' => amount(money)
+          'amount' => localized_amount(money, options[:currency] || currency(money))
         }
         add_descriptor(post, options)
 
@@ -73,7 +115,7 @@ module ActiveMerchant # :nodoc:
         raise ArgumentError, 'An authorization value must be provided.' if authorization.blank?
 
         post = {}
-        post[:amount] = amount(money)
+        post[:amount] = localized_amount(money, options[:currency] || currency(money))
         post[:payment_intent_id] = authorization
         post[:request_id] = request_id(options)
         post[:merchant_order_id] = merchant_order_id(options)
@@ -168,31 +210,35 @@ module ActiveMerchant # :nodoc:
         post[:merchant_order_id] = merchant_order_id(options)
         add_referrer_data(post, options)
         add_descriptor(post, options)
+        add_enhanced_scheme_data(post, options)
         post['payment_method_options'] = { 'card' => { 'risk_control' => { 'three_ds_action' => 'SKIP_3DS' } } } if options[:skip_3ds]
 
-        response = commit(:setup, post)
-        raise ArgumentError.new(response.message) unless response.success?
-
-        response.params['id']
+        commit(:setup, post)
       end
 
       def add_billing(post, card, options = {})
-        return unless has_name_info?(card)
+        billing_address = options[:billing_address] || {}
+        first_name, last_name = billing_names(card, billing_address)
+        # Airwallex requires both names whenever billing data is sent.
+        return unless first_name.present? && last_name.present?
 
         billing = post['payment_method']['card']['billing'] || {}
-        billing['email'] = options[:email] if options[:email]
-        billing['phone'] = options[:phone] if options[:phone]
-        billing['first_name'] = card.first_name
-        billing['last_name'] = card.last_name
-        billing_address = options[:billing_address]
+        email = options[:email] || billing_address[:email]
+        phone = options[:phone] || billing_address[:phone]
+        billing['email'] = email if email.present?
+        billing['phone'] = phone if phone.present?
+        billing['first_name'] = first_name
+        billing['last_name'] = last_name
         billing['address'] = build_address(billing_address) if has_required_address_info?(billing_address)
 
         post['payment_method']['card']['billing'] = billing
       end
 
-      def has_name_info?(card)
-        # These fields are required if billing data is sent.
-        card.first_name && card.last_name
+      # Falls back to the billing address name when the card carries no cardholder name.
+      def billing_names(card, billing_address)
+        return [card.first_name, card.last_name] if card.first_name.present? && card.last_name.present?
+
+        split_names(billing_address[:name])
       end
 
       def has_required_address_info?(address)
@@ -215,8 +261,9 @@ module ActiveMerchant # :nodoc:
       end
 
       def add_invoice(post, money, options)
-        post[:amount] = amount(money)
-        post[:currency] = (options[:currency] || currency(money))
+        currency = options[:currency] || currency(money)
+        post[:amount] = localized_amount(money, currency)
+        post[:currency] = currency
       end
 
       def add_card(post, card, options = {})
@@ -227,10 +274,11 @@ module ActiveMerchant # :nodoc:
             'expiry_year' => card.year.to_s,
             'number' => card.number.to_s,
             'name' => card.name,
-            'cvc' => card.verification_value,
             'brand' => card.brand
           }
         }
+        # Send no cvc key at all when there is none, rather than "cvc": null.
+        post['payment_method']['card']['cvc'] = card.verification_value if card.verification_value.present?
         add_billing(post, card, options)
       end
 
@@ -243,7 +291,9 @@ module ActiveMerchant # :nodoc:
           shipping = {}
           shipping[:first_name] = first_name if first_name
           shipping[:last_name] = last_name if last_name
-          shipping[:phone_number] = shipping_address[:phone_number] if shipping_address[:phone_number]
+          # Callers send the ActiveMerchant :phone key; :phone_number is kept for existing integrations.
+          phone_number = shipping_address[:phone_number] || shipping_address[:phone]
+          shipping[:phone_number] = phone_number if phone_number.present?
           shipping[:address] = physical_address
         end
 
@@ -264,6 +314,80 @@ module ActiveMerchant # :nodoc:
         address
       end
 
+      # Level 2/Level 3 data forwarded to the card schemes, which may qualify the
+      # transaction for reduced interchange. Accepted on payment intent creation only.
+      def add_enhanced_scheme_data(post, options)
+        return unless scheme_data = options[:enhanced_scheme_data]
+
+        scheme_data = scheme_data.transform_keys(&:to_sym)
+        data = {}
+
+        ENHANCED_SCHEME_DATA_LIMITS.each { |field, limit| data[field] = truncate(scheme_data[field], limit) if scheme_data[field] }
+        ENHANCED_SCHEME_DATA_AMOUNTS.each { |field| data[field] = scheme_data_amount(scheme_data[field]) if scheme_data[field] }
+        data[:summary_commodity_code] = scheme_data[:summary_commodity_code] if scheme_data[:summary_commodity_code]
+
+        data[:customer] = build_scheme_data_customer(scheme_data[:customer]) if scheme_data[:customer]
+        data[:shipping] = build_scheme_data_shipping(scheme_data[:shipping]) if scheme_data[:shipping]
+        data[:products] = scheme_data[:products].map { |product| build_scheme_data_product(product) } if scheme_data[:products].present?
+
+        return if data.empty?
+
+        post[:additional_info] = { enhanced_scheme_data: data }
+      end
+
+      def build_scheme_data_customer(customer)
+        customer = customer.transform_keys(&:to_sym)
+
+        data = {}
+        data[:first_name] = customer[:first_name] if customer[:first_name]
+        data[:last_name] = customer[:last_name] if customer[:last_name]
+        data[:reference] = truncate(customer[:reference], 17) if customer[:reference]
+        data
+      end
+
+      def build_scheme_data_shipping(shipping)
+        shipping = shipping.transform_keys(&:to_sym)
+
+        data = {}
+        data[:date] = shipping[:date] if shipping[:date]
+        data[:fee_amount] = scheme_data_amount(shipping[:fee_amount]) if shipping[:fee_amount]
+        data[:from_postcode] = truncate(shipping[:from_postcode], 10) if shipping[:from_postcode]
+        data[:address] = build_scheme_data_address(shipping[:address]) if shipping[:address]
+        data
+      end
+
+      # Accepts either Airwallex field names or the ActiveMerchant address keys.
+      def build_scheme_data_address(address)
+        address = address.transform_keys(&:to_sym)
+
+        data = {}
+        data[:country_code] = address[:country_code] || address[:country]
+        data[:street] = truncate(address[:street] || address[:address1], ENHANCED_SCHEME_DATA_ADDRESS_LIMITS[:street])
+        data[:city] = truncate(address[:city], ENHANCED_SCHEME_DATA_ADDRESS_LIMITS[:city])
+        data[:postcode] = truncate(address[:postcode] || address[:zip], ENHANCED_SCHEME_DATA_ADDRESS_LIMITS[:postcode])
+        data[:state] = truncate(address[:state], ENHANCED_SCHEME_DATA_ADDRESS_LIMITS[:state])
+        data.compact
+      end
+
+      def build_scheme_data_product(product)
+        product = product.transform_keys(&:to_sym)
+
+        data = {}
+        ENHANCED_SCHEME_DATA_PRODUCT_LIMITS.each { |field, limit| data[field] = truncate(product[field], limit) if product[field] }
+        ENHANCED_SCHEME_DATA_PRODUCT_AMOUNTS.each { |field| data[field] = scheme_data_amount(product[field]) if product[field] }
+        data[:quantity] = product[:quantity] if product[:quantity]
+        data[:tax_percent] = product[:tax_percent] if product[:tax_percent]
+        data
+      end
+
+      # Enhanced scheme data amounts are expressed in the original currency of the
+      # transaction rather than in minor units. Integers are converted per the
+      # ActiveMerchant convention that money is passed in cents; values already
+      # given as decimals are sent through untouched.
+      def scheme_data_amount(value)
+        value.is_a?(Integer) ? amount(value).to_f : value
+      end
+
       def add_stored_credential(post, options)
         return unless stored_credential = options[:stored_credential]
 
@@ -276,7 +400,9 @@ module ActiveMerchant # :nodoc:
           external_recurring_data[:merchant_trigger_reason] = 'unscheduled'
         end
 
-        external_recurring_data[:original_transaction_id] = test_mit?(options) ? test_network_transaction_id(post) : stored_credential.dig(:network_transaction_id)
+        original_transaction_id = test_network_transaction_id(post) if test_mit?(options)
+        original_transaction_id ||= stored_credential.dig(:network_transaction_id)
+        external_recurring_data[:original_transaction_id] = original_transaction_id if original_transaction_id.present?
         external_recurring_data[:triggered_by] = stored_credential.dig(:initiator) == 'cardholder' ? 'customer' : 'merchant'
       end
 
@@ -376,7 +502,13 @@ module ActiveMerchant # :nodoc:
       end
 
       def message_from(response)
-        response.dig('latest_payment_attempt', 'status') || response['status'] || response['message']
+        response.dig('latest_payment_attempt', 'status') || response['status'] || issuer_decline_message(response) || response['message']
+      end
+
+      def issuer_decline_message(response)
+        return unless response['code'] == 'issuer_declined'
+
+        ISSUER_DECLINE_MESSAGES[response['provider_original_response_code']]
       end
 
       def authorization_from(response)

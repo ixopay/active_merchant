@@ -2,6 +2,16 @@
 = ActiveMerchant CHANGELOG
 
 == HEAD
+* Airwallex: Add Level 2/Level 3 enhanced scheme data [dschexnayder-ixo]
+* Airwallex: Add American Express to supported card types [dschexnayder-ixo]
+* Airwallex: Send zero-decimal currency amounts (e.g. JPY) without fractions [dschexnayder-ixo]
+* Airwallex: Return failed payment intent creation as a failed response instead of raising [dschexnayder-ixo]
+* Airwallex: Map issuer decline response codes to specific messages [dschexnayder-ixo]
+* Airwallex: Omit empty original_transaction_id and keep supplied id in test mode for brands without a test id [dschexnayder-ixo]
+* Airwallex: Fall back to billing address name, email and phone for billing details [dschexnayder-ixo]
+* Airwallex: Use documented sandbox host api.sandbox.airwallex.com for test mode [dschexnayder-ixo]
+* Airwallex: Omit cvc when the card has no verification value [kkurapatiAtIXOPAY]
+* Airwallex: Fall back to shipping_address phone for the shipping phone number [kkurapatiAtIXOPAY]
 * Mercury, TransFirst: Repair gateways following updates to `rexml` [aenand] #5206
 * NMI: Fix Decrypted indicator for Google/Apple pay [javierpedrozaing] #5196
 * FlexCharge: add more descriptives error messages [gasb150] #5199
